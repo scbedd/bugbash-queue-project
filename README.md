@@ -1,2 +1,11 @@
 # bugbash-queue-project
 Use microsoft MCP Core to configure and deploy azure resources
+
+The goal of this is repo is to show the outcome of mcp experimentation for a real project.
+
+This package will have two pieces. A client, and work queue.
+
+The client is not really part of this, and will merely use @azure/service-bus to retrieve messages from the queue.
+
+The real goal is to test deployment and interaction with azure resources especially utilizing microsoft/mcp server.
+
