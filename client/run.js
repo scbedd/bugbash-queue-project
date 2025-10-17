@@ -5,68 +5,84 @@ import { DefaultAzureCredential } from "@azure/identity";
 
 function usage() {
   console.error(
-    `Usage: run <fully-qualified-namespace> <queue-name>\n
-Examples:\n  run my-namespace.servicebus.windows.net my-queue`
+    `Usage: run --namespace <fully-qualified-namespace> --queue <queue-name>\n
+Examples:\n  run --namespace my-namespace.servicebus.windows.net --queue my-queue`
   );
+}
+
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--namespace') out.namespace = argv[++i];
+    else if (a === '--queue' || a === '--name') out.queue = argv[++i];
+    else if (!out.namespace) out.namespace = a;
+    else if (!out.queue) out.queue = a;
+  }
+  return out;
 }
 
 async function main() {
   const argv = process.argv.slice(2);
-  if (argv.length < 2) {
+  const opts = parseArgs(argv);
+
+  if (!opts.namespace || !opts.queue) {
     usage();
     process.exitCode = 2;
     return;
   }
 
-  const [fullyQualifiedNamespace, queueName] = argv;
-
   console.log("Using DefaultAzureCredential to authenticate to Service Bus...");
   const credential = new DefaultAzureCredential();
 
   // ServiceBusClient accepts fullyQualifiedNamespace and credential when using AAD
-  const sbClient = new ServiceBusClient(fullyQualifiedNamespace, credential);
+  const sbClient = new ServiceBusClient(opts.namespace, credential);
 
-  const sender = sbClient.createSender(queueName);
+  // Create a receiver that will subscribe and process messages
+  const receiver = sbClient.createReceiver(opts.queue, { receiveMode: "peekLock" });
 
-  try {
-    const testMessage = {
-      body: `Hello from bugbash-client-sb at ${new Date().toISOString()}`,
-      contentType: "text/plain",
-      subject: "bugbash-test"
-    };
+  console.log(`Listening on ${opts.namespace} queue '${opts.queue}' - waiting for messages...`);
 
-    console.log(`Sending test message to queue '${queueName}'...`);
-    await sender.sendMessages(testMessage);
-    console.log("Message sent.");
-
-    console.log("Creating receiver to peek/receive messages (max 5) ...");
-    const receiver = sbClient.createReceiver(queueName, { receiveMode: "peekLock" });
-
-    // Try to receive a short batch of messages
-    const messages = await receiver.receiveMessages(5, { maxWaitTimeInMs: 5000 });
-    console.log(`Received ${messages.length} message(s):`);
-    for (const msg of messages) {
-      console.log(`- messageId=${msg.messageId} body=${JSON.stringify(msg.body)}`);
+  const subscription = receiver.subscribe({
+    processMessage: async (message) => {
       try {
-        await receiver.completeMessage(msg);
-        console.log(`  completed messageId=${msg.messageId}`);
-      } catch (e) {
-        console.error(`  failed to complete messageId=${msg.messageId}:`, e.message || e);
-      }
-    }
+        // Normalize body to string for printing
+        let bodyStr;
+        if (typeof message.body === 'string') bodyStr = message.body;
+        else if (message.body instanceof Uint8Array) bodyStr = new TextDecoder().decode(message.body);
+        else bodyStr = JSON.stringify(message.body);
 
-    await receiver.close();
-  } catch (err) {
-    console.error("Error while sending/receiving:", err.message || err);
-    process.exitCode = 1;
-  } finally {
+        console.log('received:', bodyStr);
+        // Complete the message so it's removed from the queue
+        await receiver.completeMessage(message);
+      } catch (err) {
+        console.error('message handling error:', err.message || err);
+      }
+    },
+    processError: async (err) => {
+      console.error('receive error:', err.message || err);
+    }
+  });
+
+  // Graceful shutdown
+  async function shutdown() {
+    console.log('Shutting down receiver...');
     try {
-      await sender.close();
+      await subscription.close();
+    } catch (e) {
+      // ignore
+    }
+    try {
+      await receiver.close();
       await sbClient.close();
     } catch (e) {
       // ignore
     }
+    process.exit(0);
   }
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith("run.js")) {

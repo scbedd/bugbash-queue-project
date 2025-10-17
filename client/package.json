@@ -10,7 +10,7 @@
     "node": ">=16"
   },
   "dependencies": {
-    "@azure/service-bus": "^7.11.0",
-    "@azure/identity": "^3.13.0"
+    "@azure/service-bus": "latest",
+    "@azure/identity": "latest"
   }
 }

@@ -1,0 +1,12 @@
+{
+  "name": "send-client",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "send": "./send.js"
+  },
+  "dependencies": {
+    "@azure/service-bus": "latest",
+    "@azure/identity": "latest"
+  }
+}
